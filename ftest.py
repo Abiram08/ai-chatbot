@@ -24,24 +24,6 @@ st.title("I am your College Guide🌆🛬")
 
 
 
-# --- Simple Authentication ---
-def login():
-    st.title("Login to College Guide Chatbot")
-    username = st.text_input("Username")
-    password = st.text_input("Password", type="password")
-    if st.button("Login"):
-        # For demo: hardcoded user/pass
-        if username == "user" and password == "pass":
-            st.session_state["user_id"] = username
-            st.session_state["authenticated"] = True
-            st.success("Login successful!")
-            st.experimental_rerun()
-        else:
-            st.error("Invalid credentials")
-
-if "authenticated" not in st.session_state or not st.session_state["authenticated"]:
-    login()
-    st.stop()
 
 # Generate or get a unique user/session id
 if "user_id" not in st.session_state:
@@ -138,6 +120,9 @@ def get_voice_input():
 @st.cache_data(show_spinner=False)
 def get_ai_response(user_input):
     """Generate AI response with fallback model and retry logic."""
+    # Custom response for 'Who are you'
+    if user_input.strip().lower() in ["who are you", "who are you?", "who r u", "who r u?"]:
+        return "I am an AI assistant to handle admission queries about Kongu Engineering College."
     max_retries = 3
     last_error = None
     
@@ -229,6 +214,33 @@ if user_input is not None:
     # Clear voice input after processing
     if 'voice_input' in st.session_state:
         st.session_state.voice_input = None
+
+
+# --- Sidebar: All Chat History in One Box ---
+import sqlite3
+st.sidebar.title("Chat History")
+
+# Show all chat history for this user in a scrollable box
+history = load_history(st.session_state["user_id"])
+if history:
+    with st.sidebar.expander("Show Chat History", expanded=False):
+        chat_html = "<div style='max-height:300px; overflow-y:auto; border:1px solid #ddd; border-radius:8px; padding:10px; background:#18191a;'>"
+        for msg in history:
+            role = msg['role'].capitalize()
+            content = msg['content']
+            chat_html += f"<div style='border-radius:8px; border:1px solid #333; padding:8px; margin-bottom:8px; background-color:{'#23272f' if role=='User' else '#1a2636'};'>"
+            chat_html += f"<b>{role}:</b><br>{content}"
+            chat_html += "</div>"
+        chat_html += "</div>"
+        st.markdown(chat_html, unsafe_allow_html=True)
+else:
+    st.sidebar.write("No chat history yet.")
+
+# New Chat button
+if st.sidebar.button("New Chat"):
+    st.session_state["messages"] = [{"role": "assistant", "content": "Hii 🤖, I'm here to help you"}]
+    # Optionally clear DB for new session, or just clear UI
+    st.rerun()
 
 # Sidebar for FAQs based on dataset (pseudo-implementation)
 faq_data = {
