@@ -1,13 +1,19 @@
+import os
+import random
 import streamlit as st
 import google.generativeai as genai
 import speech_recognition as sr
 import time
-from google.api_core.exceptions import ResourceExhausted
+from google.api_core.exceptions import ResourceExhausted, PermissionDenied
 from googletrans import Translator
 from PIL import Image
+import uuid
+from chat_db import init_db, save_message, load_history
 
-# Initialize the translator
+
+# Initialize the translator and DB
 translator = Translator()
+init_db()
 
 def translate_to_tamil(text):
     """Translate text to Tamil."""
@@ -16,28 +22,79 @@ def translate_to_tamil(text):
 
 st.title("I am your College Guide🌆🛬")
 
-# Initialize session state for memory and messages
-if "memory" not in st.session_state:
-    st.session_state["memory"] = []
 
+
+# --- Simple Authentication ---
+def login():
+    st.title("Login to College Guide Chatbot")
+    username = st.text_input("Username")
+    password = st.text_input("Password", type="password")
+    if st.button("Login"):
+        # For demo: hardcoded user/pass
+        if username == "user" and password == "pass":
+            st.session_state["user_id"] = username
+            st.session_state["authenticated"] = True
+            st.success("Login successful!")
+            st.experimental_rerun()
+        else:
+            st.error("Invalid credentials")
+
+if "authenticated" not in st.session_state or not st.session_state["authenticated"]:
+    login()
+    st.stop()
+
+# Generate or get a unique user/session id
+if "user_id" not in st.session_state:
+    st.session_state["user_id"] = str(uuid.uuid4())
+
+# Load chat history from DB
 if "messages" not in st.session_state:
-    st.session_state.messages = [
-        {"role": "assistant", "content": "Hii 🤖, I'm here to help you"}
-    ]
+    history = load_history(st.session_state["user_id"])
+    if not history:
+        history = [{"role": "assistant", "content": "Hii 🤖, I'm here to help you"}]
+    st.session_state.messages = history
+
+if "last_request_time" not in st.session_state:
+    st.session_state["last_request_time"] = 0.0
 
 # Load API key and instructions from files
-with open('mykey.txt') as f:
-    key = f.read()
+def load_api_key():
+    """Load API key from environment variables or files."""
+    key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+    if key:
+        return key.strip()
+    
+    for candidate in ("key.txt", "mykey.txt"):
+        try:
+            with open(candidate, "r") as f:
+                content = f.read().strip()
+                if content:
+                    return content
+        except FileNotFoundError:
+            continue
+    return None
+
+key = load_api_key()
+if not key:
+    st.error("API key not found. Set GEMINI_API_KEY env var or create key.txt/mykey.txt with your key.")
+    st.stop()
 
 with open("final.txt") as f:
     instructions = f.read()
 
-# Configure the Generative AI model
+# Configure the Generative AI model with fallback
 genai.configure(api_key=key)
-model = genai.GenerativeModel(
-    model_name="gemini-1.5-pro-latest",
-    system_instruction=instructions
-)
+PREFERRED_MODEL = "gemini-1.5-pro-latest"
+FALLBACK_MODEL = "gemini-1.5-flash-latest"
+
+def create_model(name):
+    return genai.GenerativeModel(
+        model_name=name,
+        system_instruction=instructions
+    )
+
+model = create_model(PREFERRED_MODEL)
+fallback_model = create_model(FALLBACK_MODEL)
 
 # Load and resize the image to optimize loading time
 image = Image.open('logo1.png').resize((200, 200))
@@ -77,10 +134,40 @@ def get_voice_input():
             st.error(f"Could not request results from Google Speech Recognition service; {e}")
             st.session_state.voice_input = None  # Clear if there's an error
 
-# Caching AI response generation to speed up repeated queries
+# Improved AI response generation with better rate limiting and fallback
 @st.cache_data(show_spinner=False)
 def get_ai_response(user_input):
-    return model.generate_content(user_input)
+    """Generate AI response with fallback model and retry logic."""
+    max_retries = 3
+    last_error = None
+    
+    for attempt in range(max_retries):
+        try:
+            # Try primary model first
+            resp = model.generate_content(user_input)
+            return resp.text
+        except ResourceExhausted as e:
+            last_error = e
+            # Try fallback model immediately
+            try:
+                resp = fallback_model.generate_content(user_input)
+                return resp.text
+            except ResourceExhausted as e2:
+                last_error = e2
+                if attempt < max_retries - 1:
+                    # Exponential backoff with jitter
+                    sleep_time = (2 ** attempt) + random.uniform(0, 1)
+                    time.sleep(sleep_time)
+        except PermissionDenied as e:
+            # Typically indicates quota not enabled or API not allowed
+            raise e
+        except Exception as e:
+            last_error = e
+            if attempt < max_retries - 1:
+                time.sleep(1)
+    
+    # If all retries exhausted
+    raise last_error if last_error else RuntimeError("Unknown error during generation")
 
 # Display chat messages
 for message in st.session_state.messages:
@@ -102,8 +189,10 @@ elif 'voice_input' in st.session_state and st.session_state.voice_input is not N
 else:
     user_input = None
 
+
 if user_input is not None:
     st.session_state.messages.append({"role": "user", "content": user_input})
+    save_message(st.session_state["user_id"], "user", user_input)
 
     with st.chat_message("user"):
         st.write(user_input)
@@ -111,30 +200,35 @@ if user_input is not None:
     if st.session_state.messages[-1]["role"] != "assistant":
         with st.chat_message("assistant"):
             with st.spinner("Loading..."):
-                max_retries = 5  # Set maximum number of retries
-                for attempt in range(max_retries):
-                    try:
-                        ai_response = get_ai_response(user_input)  # Cached function call
-                        break  # Exit loop if successful
-                    except ResourceExhausted:
-                        if attempt < max_retries - 1:
-                            wait_time = 2 ** attempt  # Exponential backoff strategy
-                            time.sleep(wait_time)
-                        else:
-                            st.error("Request limit exceeded. Please try again later.")
-                            ai_response = None
+                # Throttle requests to avoid hitting rate limits
+                min_interval = 2.0  # Minimum 2 seconds between requests
+                now = time.time()
+                last = st.session_state.get("last_request_time", 0.0)
+                if now - last < min_interval:
+                    time.sleep(min_interval - (now - last))
 
-                if ai_response is not None:
-                    response_text = ai_response.text
+                try:
+                    response_text = get_ai_response(user_input)
+                    st.session_state["last_request_time"] = time.time()
                     
                     # Translate response based on selected language
                     if language == "Tamil":
                         response_text = translate_to_tamil(response_text)
 
                     st.write(response_text)
-
                     new_ai_message = {"role": "assistant", "content": response_text}
                     st.session_state.messages.append(new_ai_message)
+                    save_message(st.session_state["user_id"], "assistant", response_text)
+                except PermissionDenied:
+                    st.error("❌ Access denied. Please check your API key has proper permissions and billing is enabled in Google AI Studio.")
+                except ResourceExhausted:
+                    st.error("⏳ Request limit exceeded. Please wait a moment and try again.")
+                except Exception as e:
+                    st.error(f"❌ An error occurred: {str(e)}")
+
+    # Clear voice input after processing
+    if 'voice_input' in st.session_state:
+        st.session_state.voice_input = None
 
 # Sidebar for FAQs based on dataset (pseudo-implementation)
 faq_data = {
