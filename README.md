@@ -1,13 +1,13 @@
-# AI ChatBot
 
-This project is a Streamlit-based AI chatbot that uses Google Gemini models for conversational AI, supports voice input, and can translate responses to Tamil. It is designed as a college guide assistant.
+# Kongu Engineering College Admission Chatbot
+
+This project is an AI-powered chatbot designed to answer queries and clarify doubts related to admissions at **Kongu Engineering College**. The chatbot provides information about courses, eligibility, application procedures, campus facilities, and other admission-related topics to assist prospective students and their parents.
 
 ## Features
-- Chat interface with memory
-- Voice input using microphone
-- Google Gemini AI integration
-- Language translation (English/Tamil)
-- Sidebar with contact info and FAQs
+- Answers frequently asked questions about Kongu Engineering College admissions
+- Provides details on courses, eligibility, and application process
+- Clarifies doubts about campus life, facilities, and more
+- User-friendly and interactive interface
 
 ## Prerequisites
 - Python 3.8 or higher
@@ -15,28 +15,25 @@ This project is a Streamlit-based AI chatbot that uses Google Gemini models for 
 
 ## Setup Instructions
 
-1. **Clone the repository:**
+1. **Install dependencies:**
+	```powershell
+	pip install -r requirements.txt
+	```
 
-```powershell
-git clone https://github.com/Abiram08/ai-chatbot.git
-cd "ai-chatbot"
-```
+2. **Add your API key:**
+	- Place your Gemini API key in a file named `key.txt` or `mykey.txt` in the project directory, **or**
+	- Set the environment variable `GEMINI_API_KEY` or `GOOGLE_API_KEY` with your key.
 
-2. **Install dependencies:**
+3. **Run the chatbot:**
+	```powershell
+	streamlit run ftest.py
+	```
 
-```powershell
-pip install -r requirements.txt
-```
+## Important Notice
+**This repository is intended solely for the use of Kongu Engineering College.**
 
-3. **Add your API key:**
-- Place your Gemini API key in a file named `key.txt` or `mykey.txt` in the project directory, **or**
-- Set the environment variable `GEMINI_API_KEY` or `GOOGLE_API_KEY` with your key.
 
-4. **Run the chatbot:**
-
-```powershell
-streamlit run ftest.py
-```
+If you have questions about this project, please contact the repository owner.
 
 5. **Usage:**
 - Open the provided local URL in your browser.
